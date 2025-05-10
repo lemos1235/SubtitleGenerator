@@ -20,7 +20,7 @@ struct LanguageOption: Identifiable, Hashable {
         LanguageOption(name: "自动", code: nil),
         LanguageOption(name: "中文", code: "zh"),
         LanguageOption(name: "日语", code: "ja"),
-        LanguageOption(name: "英文", code: "en")
+        LanguageOption(name: "英语", code: "en")
     ]
 }
 
@@ -37,10 +37,11 @@ struct ContentView: View {
     @State private var appState: AppState = .initial
     @State private var subtitleContent: String = ""
     @State private var progress: Double = 0.0
+    @State private var progressText: String = ""
     @State private var selectedLanguage: LanguageOption = LanguageOption.options[0]
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack {
             switch appState {
             case .initial:
                 initialView()
@@ -104,6 +105,14 @@ struct ContentView: View {
             ProgressView(value: progress, total: 1.0)
                 .padding()
             Text(String(format: "%.1f%%", progress * 100))
+            Text(progressText)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
         }
     }
     
@@ -211,19 +220,14 @@ struct ContentView: View {
     private func updateProgress(_ value: Double, _ status: String = "") async {
         await MainActor.run {
             self.progress = value
+            self.progressText = status
         }
     }
     
     // 使用ffmpeg将视频转为wav
     private func convertVideoToWav(videoURL: URL, outputURL: URL) async throws {
         let process = Process()
-        
-        let bundleFfmpegURL = Bundle.main.url(
-            forResource: "ffmpeg",
-            withExtension: nil
-        )!
-        
-        process.executableURL = bundleFfmpegURL
+        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/ffmpeg")
         process.arguments = [
             "-i", videoURL.path,
             "-vn", // 禁用视频
@@ -256,15 +260,21 @@ struct ContentView: View {
     // 使用WhisperKit进行语音识别
     private func transcribeAudio(audioPath: String) async throws -> TranscriptionResult {
         let pipe = try await WhisperKit(
-            WhisperKitConfig(logLevel: Logging.LogLevel.debug)
+            WhisperKitConfig(model: "large-v3_947MB", computeOptions: ModelComputeOptions(audioEncoderCompute: .cpuAndGPU), logLevel: Logging.LogLevel.debug)
         )
+        var lng = selectedLanguage.code
+        if lng == nil {
+            lng = try await pipe.detectLanguage(audioPath: audioPath).language
+        }
+        print("语言: \(lng ?? "none")")
         let results = try await pipe.transcribe(
             audioPath: audioPath,
-            decodeOptions: DecodingOptions(language: selectedLanguage.code)
+            decodeOptions: DecodingOptions(language: lng)
         ) { progress in
-            // 更新识别进度（从0.4到0.8）
             Task {
-                await self.updateProgress(0.4 + 0.2)
+                let cleanText = cleanTranscriptionText(progress.text)
+                print("cleanText: \(cleanText)")
+                await updateProgress(0.6, "正在生成字幕: \(cleanText)")
             }
             return true // 继续处理
         }
@@ -286,6 +296,17 @@ struct ContentView: View {
         let m = (totalMilliseconds / 60000) % 60
         let h = totalMilliseconds / 3600000
         return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+    }
+    
+    // 清洗识别文本，提取实际内容
+    private func cleanTranscriptionText(_ text: String) -> String {
+        let cleaned = text.replacingOccurrences(
+            of: #"<\|.*?\|>"#,
+            with: "",
+            options: .regularExpression
+        )
+        
+        return cleaned
     }
     
     /// Format a time value as a string
@@ -325,17 +346,7 @@ struct ContentView: View {
             decimalMarker: ","
         )
         // 用正则提取文本内容
-        let pattern = "<\\|\\d+\\.\\d+\\|>(.*?)<\\|\\d+\\.\\d+\\|>"
-        var extractedText = ""
-        if let regex = try? NSRegularExpression(pattern: pattern),
-           let match = regex.firstMatch(
-            in: text,
-            options: [],
-            range: NSRange(text.startIndex..., in: text)
-           ),
-           let range = Range(match.range(at: 1), in: text) {
-            extractedText = String(text[range])
-        }
+        let extractedText = cleanTranscriptionText(text)
         return "\(index)\n\(startFormatted) --> \(endFormatted)\n\(extractedText)"
     }
     
