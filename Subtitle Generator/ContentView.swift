@@ -39,6 +39,7 @@ struct ContentView: View {
     @State private var progress: Double = 0.0
     @State private var progressText: String = ""
     @State private var selectedLanguage: LanguageOption = LanguageOption.options[0]
+    @State private var currentTask: Task<Void, Never>? = nil
     
     var body: some View {
         VStack {
@@ -90,7 +91,7 @@ struct ContentView: View {
                 
                 Button("生成字幕") {
                     appState = .processing(url)
-                    Task {
+                    currentTask = Task {
                         await processVideo(url: url)
                     }
                 }
@@ -104,7 +105,17 @@ struct ContentView: View {
             Text("正在处理视频..")
             ProgressView(value: progress, total: 1.0)
                 .padding()
-            Text(String(format: "%.1f%%", progress * 100))
+            HStack {
+                Text(String(format: "%.1f%%", progress * 100))
+                Button("停止") {
+                    // 取消任务
+                    currentTask?.cancel()
+                    currentTask = nil
+                    
+                    // 重置状态
+                    appState = .initial
+                }
+            }
             Text(progressText)
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -175,6 +186,11 @@ struct ContentView: View {
     // 处理视频生成字幕
     private func processVideo(url: URL) async {
         do {
+            // 检查任务是否已取消
+            if Task.isCancelled {
+                return
+            }
+            
             // 更新进度
             await updateProgress(0.1, "正在转换音频...")
             
@@ -187,12 +203,26 @@ struct ContentView: View {
             // 使用ffmpeg将视频转为wav
             try await convertVideoToWav(videoURL: url, outputURL: wavPath)
             
+            // 检查任务是否已取消
+            if Task.isCancelled {
+                // 删除临时文件
+                try? FileManager.default.removeItem(at: wavPath)
+                return
+            }
+            
             await updateProgress(0.4, "正在识别语音...")
             
             // 使用WhisperKit进行语音识别
             let transcription = try await transcribeAudio(
                 audioPath: wavPath.path
             )
+            
+            // 检查任务是否已取消
+            if Task.isCancelled {
+                // 删除临时文件
+                try? FileManager.default.removeItem(at: wavPath)
+                return
+            }
             
             await updateProgress(0.8, "正在生成字幕...")
             
@@ -204,14 +234,22 @@ struct ContentView: View {
             // 删除临时文件
             try FileManager.default.removeItem(at: wavPath)
             
+            // 检查任务是否已取消
+            if Task.isCancelled {
+                return
+            }
+            
             // 更新状态
             await MainActor.run {
                 appState = .completed(url)
             }
             
         } catch {
-            await MainActor.run {
-                appState = .error("处理失败: \(error.localizedDescription)")
+            // 如果不是因为取消导致的错误，才显示错误状态
+            if !Task.isCancelled {
+                await MainActor.run {
+                    appState = .error("处理失败: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -272,11 +310,16 @@ struct ContentView: View {
             decodeOptions: DecodingOptions(language: lng)
         ) { progress in
             Task {
+                // 检查任务是否已取消
+                if Task.isCancelled {
+                    return
+                }
+                
                 let cleanText = cleanTranscriptionText(progress.text)
                 print("cleanText: \(cleanText)")
-                await updateProgress(0.6, "正在生成字幕: \(cleanText)")
+                await updateProgress(0.6, "生成中: \(cleanText)")
             }
-            return true // 继续处理
+            return !Task.isCancelled
         }
         guard let transcription = results.first else {
             throw NSError(
@@ -410,7 +453,6 @@ struct ContentView: View {
                     }
                 }
             }
-            // 如果取消，保持在completed状态
         }
     }
 }
