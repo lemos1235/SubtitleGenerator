@@ -24,7 +24,7 @@ struct LanguageOption: Identifiable, Hashable {
     ]
 }
 
-enum AppState {
+enum AppState: Equatable {
     case initial
     case fileSelected(URL)
     case processing(URL)
@@ -42,117 +42,297 @@ struct ContentView: View {
     @State private var currentTask: Task<Void, Never>? = nil
     
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
             switch appState {
             case .initial:
                 initialView()
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
             case .fileSelected(let url):
                 fileSelectedView(url: url)
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             case .processing:
                 processingView()
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
             case .completed(let url):
                 completedView(url: url)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             case .saveSuccess:
                 saveSuccessView()
+                    .transition(.opacity.combined(with: .scale(scale: 1.05)))
             case .error(let message):
                 errorView(message: message)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding()
-        .frame(width: 400, height: 300)
+        .padding(24)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.1), radius: 20, x: 0, y: 8)
+        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: appState)
+        .tint(.accentColor)
     }
     
-    // 初始化状态视图
+    // 初始化状态视图优化
     private func initialView() -> some View {
-        Button("选择文件") {
-            selectFile()
+        VStack(spacing: 16) {
+            Image(systemName: "doc.badge.plus")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(.secondary)
+                .symbolEffect(.pulse.byLayer, options: .repeating)
+            
+            Text("选择视频文件")
+                .font(.title3)
+                .fontWeight(.medium)
+                .foregroundStyle(.primary)
+            
+            Text("支持 MP4、MOV、MKV、FLV 格式")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            Button("选择文件") {
+                selectFile()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+            .focusable(false)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    // 已选择文件状态视图
+    // 已选择文件状态视图优化
     private func fileSelectedView(url: URL) -> some View {
         VStack(spacing: 20) {
-            Text("已选择：\(url.lastPathComponent)")
-                .lineLimit(1)
-                .truncationMode(.middle)
-            
-            HStack(spacing: 6) {
-                Button("重新选择") {
-                    selectFile()
-                }
-                
-                Picker("语言", selection: $selectedLanguage) {
-                    ForEach(LanguageOption.options) { option in
-                        Text(option.name).tag(option)
-                    }
-                }
-                .frame(maxWidth: 70)
-                .labelsHidden()
-                
-                Button("生成字幕") {
-                    appState = .processing(url)
-                    currentTask = Task {
-                        await processVideo(url: url)
-                    }
-                }
-            }
-        }
-    }
-    
-    // 处理中状态视图
-    private func processingView() -> some View {
-        VStack {
-            Text("正在处理视频..")
-            ProgressView(value: progress, total: 1.0)
-                .padding()
-            HStack {
-                Text(String(format: "%.1f%%", progress * 100))
-                Button("停止") {
-                    // 取消任务
-                    currentTask?.cancel()
-                    currentTask = nil
+            // 文件信息卡片
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "video.fill")
+                        .font(.title2)
+                        .foregroundStyle(.blue)
+                        .frame(width: 32, height: 32)
+                        .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
                     
-                    // 重置状态
-                    appState = .initial
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(url.lastPathComponent)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                        
+                        if let fileSize = getFileSize(url: url) {
+                            Text("文件大小: \(fileSize)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.green)
+                }
+                .padding(16)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(.separator.opacity(0.5), lineWidth: 0.5)
+                )
+            }
+            
+            // 设置区域
+            VStack(spacing: 16) {
+                HStack {
+                    Label("识别语言", systemImage: "globe")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                    
+                    Spacer()
+                    
+                    Picker("语言", selection: $selectedLanguage) {
+                        ForEach(LanguageOption.options) { option in
+                            Text(option.name).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(minWidth: 100)
+                }
+                .padding(.horizontal, 4)
+                
+                Divider()
+                
+                // 操作按钮
+                HStack(spacing: 12) {
+                    Button("重新选择") {
+                        selectFile()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    
+                    Button("开始生成") {
+                        appState = .processing(url)
+                        currentTask = Task {
+                            await processVideo(url: url)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .keyboardShortcut(.defaultAction)
                 }
             }
-            Text(progressText)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 16)
-                .padding(.top, 2)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    // 已完成状态视图
-    private func completedView(url: URL) -> some View {
+    // 获取文件大小的辅助函数
+    private func getFileSize(url: URL) -> String? {
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
+            if let fileSize = resourceValues.fileSize {
+                return ByteCountFormatter.string(fromByteCount: Int64(fileSize), countStyle: .file)
+            }
+        } catch {
+            print("获取文件大小失败: \(error)")
+        }
+        return nil
+    }
+    
+    // 处理中状态视图优化
+    private func processingView() -> some View {
         VStack(spacing: 20) {
-            Text("已完成")
+            VStack(spacing: 12) {
+                Image(systemName: "waveform.circle")
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundStyle(.blue)
+                    .symbolEffect(.variableColor.iterative.dimInactiveLayers)
+                
+                Text("正在处理视频")
+                    .font(.title3)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
+            }
+            
+            VStack(spacing: 16) {
+                ProgressView(value: progress, total: 1.0)
+                    .progressViewStyle(.linear)
+                    .scaleEffect(y: 1.5)
+                    .padding(.horizontal, 8)
+                
+                HStack {
+                    Text(String(format: "%.0f%%", progress * 100))
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                        .monospacedDigit()
+                    
+                    Button("停止") {
+                        currentTask?.cancel()
+                        currentTask = nil
+                        appState = .initial
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                
+                if !progressText.isEmpty {
+                    Text(progressText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    // 已完成状态视图优化
+    private func completedView(url: URL) -> some View {
+        VStack(spacing: 24) {
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(.green)
+                    .symbolEffect(.bounce, value: appState)
+                
+                Text("字幕已生成")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+            }
             
             Button("保存字幕") {
                 saveSubtitle(for: url)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    // 保存成功状态视图
+    // 保存成功状态视图优化
     private func saveSuccessView() -> some View {
-        VStack(spacing: 20) {
-            Text("保存成功")
+        VStack(spacing: 24) {
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(.green)
+                    .symbolEffect(.bounce, value: appState)
+                
+                Text("保存成功")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                
+                Text("字幕文件已保存到指定位置")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             
-            Button("下一个") {
+            Button("继续处理下一个") {
                 appState = .initial
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    // 错误状态视图
+    // 错误状态视图优化
     private func errorView(message: String) -> some View {
-        Text("出错了~\n\(message)")
-            .multilineTextAlignment(.center)
+        VStack(spacing: 24) {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundStyle(.orange)
+                    .symbolEffect(.bounce, value: appState)
+                
+                Text("处理出错")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .padding(.horizontal, 8)
+            }
+            
+            Button("返回") {
+                appState = .initial
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     // 选择文件
