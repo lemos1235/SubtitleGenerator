@@ -14,6 +14,6 @@ struct Subtitle_GeneratorApp: App {
             ContentView()
                 .frame(width: 350, height: 224)
         }
-        // .windowResizability(.contentSize)
+        .windowResizability(.contentSize)
     }
 }

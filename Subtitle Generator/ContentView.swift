@@ -64,39 +64,89 @@ struct ContentView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(24)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.1), radius: 20, x: 0, y: 8)
+        .padding(20)
+        .frame(width: .infinity, height: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.08), radius: 16, x: 0, y: 6)
         .animation(.spring(response: 0.5, dampingFraction: 0.8), value: appState)
         .tint(.accentColor)
     }
     
     // 初始化状态视图优化
     private func initialView() -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "doc.badge.plus")
-                .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.secondary)
-                .symbolEffect(.pulse.byLayer, options: .repeating)
-            
-            Text("选择视频文件")
-                .font(.title3)
-                .fontWeight(.medium)
-                .foregroundStyle(.primary)
-            
-            Text("支持 MP4、MOV、MKV、FLV 格式")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            
-            Button("选择文件") {
-                selectFile()
+        VStack(spacing: 20) {
+            // 主要图标和标题
+            VStack(spacing: 12) {
+                Image(systemName: "video.badge.plus")
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundStyle(.blue)
+                    .symbolEffect(.pulse.byLayer, options: .repeating)
+                
+                Text("字幕生成器")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
-            .focusable(false)
+            
+            // 简化的操作区域
+            VStack(spacing: 12) {
+                // 支持格式展示
+                HStack(spacing: 8) {
+                    ForEach(["MP4", "MOV", "MKV", "FLV"], id: \.self) { format in
+                        Text(format)
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                    }
+                }
+                
+                // 选择按钮
+                Button(action: selectFile) {
+                    HStack(spacing: 6) {
+                        // Image(systemName: "plus.circle.fill")
+                        Text("选择视频文件")
+                            .fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .keyboardShortcut(.defaultAction)
+                .focusable(false)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleDrop(providers: providers)
+        }
+    }
+    
+    // 处理拖拽文件
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        
+        provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, error in
+            guard let data = item as? Data,
+                  let url = URL(dataRepresentation: data, relativeTo: nil) else {
+                return
+            }
+            
+            // 检查文件类型
+            let allowedExtensions = ["mp4", "mov", "mkv", "flv", "avi", "wmv"]
+            let fileExtension = url.pathExtension.lowercased()
+            
+            if allowedExtensions.contains(fileExtension) {
+                DispatchQueue.main.async {
+                    self.appState = .fileSelected(url)
+                }
+            }
+        }
+        
+        return true
     }
     
     // 已选择文件状态视图优化
